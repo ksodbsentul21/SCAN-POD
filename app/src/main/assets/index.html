@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>H JOEL POD</title>
+<script src="https://unpkg.com/html5-qrcode"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f2f3f5;font-family:Arial,Helvetica,sans-serif;color:#20252b}
+.app{max-width:520px;min-height:100vh;margin:auto;background:#fff}
+.header{padding:15px;text-align:center;background:#fff;border-bottom:4px solid #ff6a00}
+.logo{width:100%;max-width:350px;display:block;margin:auto}
+.content{padding:18px}
+.field{margin-bottom:15px}
+label{display:block;margin-bottom:6px;font-size:14px;font-weight:700}
+input,select{width:100%;min-height:49px;padding:11px;border:1px solid #ccd0d5;border-radius:9px;background:#fff;font-size:16px;outline:none}
+.section-title{margin:20px 0 12px;font-size:15px;font-weight:900}
+.btn-dark,.btn-red,.btn-green,.btn-orange{width:100%;min-height:49px;border:0;border-radius:9px;font-size:16px;font-weight:900}
+.btn-dark{background:#20252b;color:#fff}
+.btn-red{background:#d9342b;color:#fff}
+.btn-green{background:#148c47;color:#fff}
+.btn-orange{background:#ff6a00;color:#fff}
+#reader{width:100%;margin-top:10px;overflow:hidden;border-radius:12px;background:#111}
+.photo-card{padding:12px;border:1px dashed #d5d7da;border-radius:12px;margin-bottom:14px}
+.photo-preview{display:none;width:100%;max-height:320px;object-fit:contain;border-radius:10px;background:#f5f5f5;margin-top:8px}
+.status{display:none;margin-top:15px;padding:12px;border-radius:9px;text-align:center;font-weight:bold;line-height:1.4}
+.status.success{display:block;background:#e1f5e9;color:#14723b}
+.status.error{display:block;background:#fde5e3;color:#b1261c}
+.status.info{display:block;background:#fff0df;color:#975300}
+.hint{font-size:12px;color:#7a7f85;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <img src="H_JOEL_LOGISTICS_logo.png" class="logo" alt="H JOEL LOGISTICS">
+  </div>
+
+  <div class="content">
+    <div class="section-title">PROOF OF DELIVERY</div>
+
+    <div class="field">
+      <label>Tanggal POD</label>
+      <input type="date" id="tanggalPOD">
+    </div>
+
+    <div class="field">
+      <label>AWB</label>
+      <input type="text" id="awb" placeholder="Ketik manual atau scan AWB">
+      <button type="button" class="btn-dark" id="btnStartScanner" onclick="startScanner()" style="margin-top:8px;">📷 MULAI SCAN AWB</button>
+      <button type="button" class="btn-red" id="btnStopScanner" onclick="stopScanner()" style="display:none;margin-top:8px;">⛔ STOP SCANNER</button>
+      <div id="reader"></div>
+      <div class="hint">Scanner dibuat sama pola seperti aplikasi Outbound: kamera tampil langsung di halaman, hasil scan langsung masuk ke kolom AWB.</div>
+    </div>
+
+    <div class="field">
+      <label>Area</label>
+      <select id="area">
+        <option value="">Memuat Area...</option>
+      </select>
+    </div>
+
+    <div class="section-title">FOTO POD</div>
+
+    
+    <div class="photo-card">
+      <label>Foto Unit, Penerima & Plang Sekolah</label>
+      <button type="button" class="btn-orange" onclick="AndroidBridge.choosePhoto(1)">📷 PILIH KAMERA</button>
+      <img id="preview1" class="photo-preview">
+    </div>
+    
+    <div class="photo-card">
+      <label>Foto Plang / Papan Sekolah</label>
+      <button type="button" class="btn-orange" onclick="AndroidBridge.choosePhoto(2)">📷 PILIH KAMERA</button>
+      <img id="preview2" class="photo-preview">
+    </div>
+    
+    <div class="photo-card">
+      <label>BAST</label>
+      <button type="button" class="btn-orange" onclick="AndroidBridge.choosePhoto(3)">📷 PILIH KAMERA</button>
+      <img id="preview3" class="photo-preview">
+    </div>
+    
+    <div class="photo-card">
+      <label>Foto Serial Number Unit</label>
+      <button type="button" class="btn-orange" onclick="AndroidBridge.choosePhoto(4)">📷 PILIH KAMERA</button>
+      <img id="preview4" class="photo-preview">
+    </div>
+    
+
+    <button type="button" class="btn-green" onclick="savePOD()">💾 SIMPAN POD</button>
+    <div id="status" class="status"></div>
+  </div>
+</div>
+
+<script>
+let scanner=null;
+let scanLock=false;
+let audioContext=null;
+let photos={1:'',2:'',3:'',4:''};
+
+document.addEventListener('DOMContentLoaded', function(){
+  const now=new Date();
+  document.getElementById('tanggalPOD').value=
+    now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  AndroidBridge.loadAreas();
+});
+
+function setAreas(json){
+  try{
+    const list=JSON.parse(json||'[]');
+    const s=document.getElementById('area');
+    s.innerHTML='<option value="">-- PILIH AREA --</option>';
+    list.forEach(function(v){
+      const o=document.createElement('option');
+      o.value=v;o.textContent=v;s.appendChild(o);
+    });
+  }catch(e){
+    showStatus('Area gagal dimuat.','error');
+  }
+}
+
+async function startScanner(){
+  clearStatus();
+
+  try{
+    if(!audioContext){
+      audioContext=new (window.AudioContext||window.webkitAudioContext)();
+    }
+    if(audioContext.state==='suspended') await audioContext.resume();
+  }catch(e){}
+
+  if(scanner) return;
+
+  try{
+    scanner=new Html5Qrcode('reader');
+
+    await scanner.start(
+      {facingMode:'environment'},
+      {
+        fps:12,
+        qrbox:function(width){
+          let w=Math.floor(width*.90);
+          if(w>380) w=380;
+          return {width:w,height:140};
+        }
+      },
+      scanSuccess,
+      function(){}
+    );
+
+    document.getElementById('btnStartScanner').style.display='none';
+    document.getElementById('btnStopScanner').style.display='block';
+
+  }catch(e){
+    scanner=null;
+    showStatus('Kamera scanner gagal dibuka. Pastikan izin kamera diberikan.','error');
+  }
+}
+
+async function scanSuccess(decodedText){
+  if(scanLock) return;
+
+  const awb=String(decodedText||'').trim();
+  if(!awb) return;
+
+  scanLock=true;
+  document.getElementById('awb').value=awb;
+  successBeep();
+
+  if(navigator.vibrate) navigator.vibrate(120);
+
+  showStatus('SCAN BERHASIL: '+awb,'success');
+  await stopScanner();
+
+  setTimeout(function(){scanLock=false;},500);
+}
+
+async function stopScanner(){
+  if(!scanner) return;
+  try{
+    await scanner.stop();
+    scanner.clear();
+  }catch(e){}
+  scanner=null;
+  document.getElementById('btnStartScanner').style.display='block';
+  document.getElementById('btnStopScanner').style.display='none';
+}
+
+function successBeep(){
+  try{
+    if(!audioContext) return;
+    const oscillator=audioContext.createOscillator();
+    const gain=audioContext.createGain();
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.frequency.value=1100;
+    gain.gain.value=.28;
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime+.15);
+  }catch(e){}
+}
+
+function setPhotoFromAndroid(slot,dataUrl){
+  photos[slot]=dataUrl||'';
+  const p=document.getElementById('preview'+slot);
+  p.src=dataUrl;
+  p.style.display=dataUrl?'block':'none';
+}
+
+function savePOD(){
+  const payload={
+    tanggalPOD:document.getElementById('tanggalPOD').value,
+    awb:document.getElementById('awb').value.trim(),
+    area:document.getElementById('area').value,
+    foto1:photos[1],foto2:photos[2],foto3:photos[3],foto4:photos[4]
+  };
+
+  if(!payload.tanggalPOD) return showStatus('Tanggal wajib diisi.','error');
+  if(!payload.awb) return showStatus('AWB wajib diisi.','error');
+  if(!payload.area) return showStatus('Area wajib dipilih.','error');
+  if(!payload.foto1||!payload.foto2||!payload.foto3||!payload.foto4) return showStatus('Semua 4 foto wajib diisi.','error');
+
+  showStatus('Menyimpan POD...','info');
+  AndroidBridge.savePOD(JSON.stringify(payload));
+}
+
+function saveResult(success,message){
+  showStatus(message,success?'success':'error');
+  if(success){
+    document.getElementById('awb').value='';
+    photos={1:'',2:'',3:'',4:''};
+    for(let i=1;i<=4;i++){
+      const p=document.getElementById('preview'+i);
+      p.src='';p.style.display='none';
+    }
+  }
+}
+
+function showStatus(message,type){
+  const s=document.getElementById('status');
+  s.className='status '+type;
+  s.textContent=message;
+}
+
+function clearStatus(){
+  const s=document.getElementById('status');
+  s.className='status';
+  s.textContent='';
+}
+</script>
+</body>
+</html>
