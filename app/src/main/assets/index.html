@@ -23,12 +23,18 @@ input,select{width:100%;min-height:49px;padding:11px;border:1px solid #ccd0d5;bo
 .btn-orange{background:#ff6a00;color:#fff}
 #reader{width:100%;margin-top:10px;overflow:hidden;border-radius:12px;background:#111}
 .photo-card{padding:12px;border:1px dashed #d5d7da;border-radius:12px;margin-bottom:14px}
-.photo-preview{display:none;width:100%;max-height:320px;object-fit:contain;border-radius:10px;background:#f5f5f5;margin-top:8px}
+.photo-preview{display:none;width:100%;max-height:340px;object-fit:contain;border-radius:10px;background:#f5f5f5;margin-top:8px}
 .status{display:none;margin-top:15px;padding:12px;border-radius:9px;text-align:center;font-weight:bold;line-height:1.4}
 .status.success{display:block;background:#e1f5e9;color:#14723b}
 .status.error{display:block;background:#fde5e3;color:#b1261c}
 .status.info{display:block;background:#fff0df;color:#975300}
 .hint{font-size:12px;color:#7a7f85;margin-top:6px}
+.camera-modal{display:none;position:fixed;inset:0;background:#000;z-index:9999;overflow:auto}
+.camera-wrap{max-width:520px;margin:auto;min-height:100vh;background:#000;padding:12px}
+.camera-title{color:#fff;font-weight:900;text-align:center;padding:10px}
+#photoVideo{width:100%;max-height:72vh;object-fit:cover;border-radius:12px;background:#111}
+.camera-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.small-note{color:#ddd;text-align:center;font-size:12px;padding:8px 0}
 </style>
 </head>
 <body>
@@ -51,7 +57,7 @@ input,select{width:100%;min-height:49px;padding:11px;border:1px solid #ccd0d5;bo
       <button type="button" class="btn-dark" id="btnStartScanner" onclick="startScanner()" style="margin-top:8px;">📷 MULAI SCAN AWB</button>
       <button type="button" class="btn-red" id="btnStopScanner" onclick="stopScanner()" style="display:none;margin-top:8px;">⛔ STOP SCANNER</button>
       <div id="reader"></div>
-      <div class="hint">Scanner dibuat sama pola seperti aplikasi Outbound: kamera tampil langsung di halaman, hasil scan langsung masuk ke kolom AWB.</div>
+      <div class="hint">Scan tampil langsung di aplikasi. Setelah terbaca, AWB langsung masuk ke kolom.</div>
     </div>
 
     <div class="field">
@@ -63,34 +69,44 @@ input,select{width:100%;min-height:49px;padding:11px;border:1px solid #ccd0d5;bo
 
     <div class="section-title">FOTO POD</div>
 
-    
     <div class="photo-card">
       <label>Foto Unit, Penerima & Plang Sekolah</label>
-      <button type="button" class="btn-orange" onclick="AndroidBridge.choosePhoto(1)">📷 PILIH KAMERA</button>
+      <button type="button" class="btn-orange" onclick="openInternalCamera(1)">📷 AMBIL FOTO</button>
       <img id="preview1" class="photo-preview">
     </div>
-    
+
     <div class="photo-card">
       <label>Foto Plang / Papan Sekolah</label>
-      <button type="button" class="btn-orange" onclick="AndroidBridge.choosePhoto(2)">📷 PILIH KAMERA</button>
+      <button type="button" class="btn-orange" onclick="openInternalCamera(2)">📷 AMBIL FOTO</button>
       <img id="preview2" class="photo-preview">
     </div>
-    
+
     <div class="photo-card">
       <label>BAST</label>
-      <button type="button" class="btn-orange" onclick="AndroidBridge.choosePhoto(3)">📷 PILIH KAMERA</button>
+      <button type="button" class="btn-orange" onclick="openInternalCamera(3)">📷 AMBIL FOTO</button>
       <img id="preview3" class="photo-preview">
     </div>
-    
+
     <div class="photo-card">
       <label>Foto Serial Number Unit</label>
-      <button type="button" class="btn-orange" onclick="AndroidBridge.choosePhoto(4)">📷 PILIH KAMERA</button>
+      <button type="button" class="btn-orange" onclick="openInternalCamera(4)">📷 AMBIL FOTO</button>
       <img id="preview4" class="photo-preview">
     </div>
-    
 
     <button type="button" class="btn-green" onclick="savePOD()">💾 SIMPAN POD</button>
     <div id="status" class="status"></div>
+  </div>
+</div>
+
+<div id="cameraModal" class="camera-modal">
+  <div class="camera-wrap">
+    <div id="cameraTitle" class="camera-title">KAMERA H JOEL</div>
+    <video id="photoVideo" autoplay playsinline muted></video>
+    <div class="small-note">Timestamp, AWB, Area dan GPS akan ditempel otomatis pada foto.</div>
+    <div class="camera-actions">
+      <button type="button" class="btn-green" onclick="captureInternalPhoto()">📸 AMBIL FOTO</button>
+      <button type="button" class="btn-red" onclick="closeInternalCamera()">TUTUP</button>
+    </div>
   </div>
 </div>
 
@@ -100,11 +116,27 @@ let scanLock=false;
 let audioContext=null;
 let photos={1:'',2:'',3:'',4:''};
 
+let photoStream=null;
+let activePhotoSlot=0;
+let lastGps={lat:null,lng:null};
+
 document.addEventListener('DOMContentLoaded', function(){
   const now=new Date();
   document.getElementById('tanggalPOD').value=
     now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
-  AndroidBridge.loadAreas();
+
+  try{ AndroidBridge.loadAreas(); }catch(e){}
+
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(
+      function(pos){
+        lastGps.lat=pos.coords.latitude;
+        lastGps.lng=pos.coords.longitude;
+      },
+      function(){},
+      {enableHighAccuracy:true,timeout:8000,maximumAge:30000}
+    );
+  }
 });
 
 function setAreas(json){
@@ -130,6 +162,8 @@ async function startScanner(){
     }
     if(audioContext.state==='suspended') await audioContext.resume();
   }catch(e){}
+
+  closeInternalCamera();
 
   if(scanner) return;
 
@@ -202,11 +236,144 @@ function successBeep(){
   }catch(e){}
 }
 
-function setPhotoFromAndroid(slot,dataUrl){
-  photos[slot]=dataUrl||'';
-  const p=document.getElementById('preview'+slot);
+async function openInternalCamera(slot){
+  clearStatus();
+
+  if(scanner) await stopScanner();
+  closeInternalCamera();
+
+  activePhotoSlot=slot;
+
+  const names={
+    1:'Foto Unit, Penerima & Plang Sekolah',
+    2:'Foto Plang / Papan Sekolah',
+    3:'BAST',
+    4:'Foto Serial Number Unit'
+  };
+
+  document.getElementById('cameraTitle').textContent=names[slot]||'KAMERA H JOEL';
+
+  try{
+    photoStream=await navigator.mediaDevices.getUserMedia({
+      video:{
+        facingMode:{ideal:'environment'},
+        width:{ideal:1920},
+        height:{ideal:1080}
+      },
+      audio:false
+    });
+
+    const v=document.getElementById('photoVideo');
+    v.srcObject=photoStream;
+    await v.play();
+
+    document.getElementById('cameraModal').style.display='block';
+
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(
+        function(pos){
+          lastGps.lat=pos.coords.latitude;
+          lastGps.lng=pos.coords.longitude;
+        },
+        function(){},
+        {enableHighAccuracy:true,timeout:6000,maximumAge:15000}
+      );
+    }
+
+  }catch(e){
+    showStatus('Kamera foto gagal dibuka. Pastikan izin kamera diberikan.','error');
+  }
+}
+
+function captureInternalPhoto(){
+  const video=document.getElementById('photoVideo');
+
+  if(!video.videoWidth || !video.videoHeight){
+    showStatus('Kamera belum siap.','error');
+    return;
+  }
+
+  let width=video.videoWidth;
+  let height=video.videoHeight;
+
+  if(width>1600){
+    height=Math.round(height*1600/width);
+    width=1600;
+  }
+
+  const canvas=document.createElement('canvas');
+  canvas.width=width;
+  canvas.height=height;
+
+  const ctx=canvas.getContext('2d');
+  ctx.drawImage(video,0,0,width,height);
+
+  const now=new Date();
+  const tanggal=String(now.getDate()).padStart(2,'0')+'-'+
+                String(now.getMonth()+1).padStart(2,'0')+'-'+
+                now.getFullYear();
+  const jam=String(now.getHours()).padStart(2,'0')+':'+
+            String(now.getMinutes()).padStart(2,'0')+':'+
+            String(now.getSeconds()).padStart(2,'0');
+
+  const awb=document.getElementById('awb').value.trim() || '-';
+  const area=document.getElementById('area').value || '-';
+
+  const gps=(lastGps.lat!==null && lastGps.lng!==null)
+    ? lastGps.lat.toFixed(6)+', '+lastGps.lng.toFixed(6)
+    : 'GPS belum tersedia';
+
+  const lines=[
+    tanggal+' '+jam,
+    'AWB: '+awb,
+    'Area: '+area,
+    'GPS: '+gps,
+    'H JOEL LOGISTICS'
+  ];
+
+  const fontSize=Math.max(22,Math.round(width*0.022));
+  const padding=Math.round(fontSize*0.7);
+  const lineHeight=Math.round(fontSize*1.35);
+  const boxHeight=lineHeight*lines.length + padding*2;
+
+  ctx.fillStyle='rgba(0,0,0,0.58)';
+  ctx.fillRect(0,height-boxHeight,width,boxHeight);
+
+  ctx.fillStyle='#ffffff';
+  ctx.font='bold '+fontSize+'px Arial';
+  ctx.textAlign='right';
+  ctx.textBaseline='top';
+
+  let y=height-boxHeight+padding;
+  lines.forEach(function(line){
+    ctx.fillText(line,width-padding,y);
+    y+=lineHeight;
+  });
+
+  const dataUrl=canvas.toDataURL('image/jpeg',0.78);
+
+  photos[activePhotoSlot]=dataUrl;
+
+  const p=document.getElementById('preview'+activePhotoSlot);
   p.src=dataUrl;
-  p.style.display=dataUrl?'block':'none';
+  p.style.display='block';
+
+  closeInternalCamera();
+
+  showStatus('Foto berhasil diambil dan langsung masuk ke form.','success');
+}
+
+function closeInternalCamera(){
+  if(photoStream){
+    photoStream.getTracks().forEach(function(track){track.stop();});
+    photoStream=null;
+  }
+
+  const v=document.getElementById('photoVideo');
+  if(v) v.srcObject=null;
+
+  const m=document.getElementById('cameraModal');
+  if(m) m.style.display='none';
 }
 
 function savePOD(){
@@ -228,12 +395,15 @@ function savePOD(){
 
 function saveResult(success,message){
   showStatus(message,success?'success':'error');
+
   if(success){
     document.getElementById('awb').value='';
     photos={1:'',2:'',3:'',4:''};
+
     for(let i=1;i<=4;i++){
       const p=document.getElementById('preview'+i);
-      p.src='';p.style.display='none';
+      p.src='';
+      p.style.display='none';
     }
   }
 }
