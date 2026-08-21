@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>H JOEL POD</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f2f3f5;font-family:Arial,Helvetica,sans-serif;color:#20252b}
@@ -118,7 +120,8 @@ let photos={1:'',2:'',3:'',4:''};
 
 let photoStream=null;
 let activePhotoSlot=0;
-let lastGps={lat:null,lng:null};
+let lastGps={lat:null,lng:null,alt:null,speed:null,heading:null};
+let lastAddress={village:'',subdistrict:'',city:'',province:''};
 
 document.addEventListener('DOMContentLoaded', function(){
   const now=new Date();
@@ -130,8 +133,7 @@ document.addEventListener('DOMContentLoaded', function(){
   if(navigator.geolocation){
     navigator.geolocation.getCurrentPosition(
       function(pos){
-        lastGps.lat=pos.coords.latitude;
-        lastGps.lng=pos.coords.longitude;
+        updateGps(pos);
       },
       function(){},
       {enableHighAccuracy:true,timeout:8000,maximumAge:30000}
@@ -272,8 +274,7 @@ async function openInternalCamera(slot){
     if(navigator.geolocation){
       navigator.geolocation.getCurrentPosition(
         function(pos){
-          lastGps.lat=pos.coords.latitude;
-          lastGps.lng=pos.coords.longitude;
+          updateGps(pos);
         },
         function(){},
         {enableHighAccuracy:true,timeout:6000,maximumAge:15000}
@@ -285,7 +286,51 @@ async function openInternalCamera(slot){
   }
 }
 
-function captureInternalPhoto(){
+
+function updateGps(pos){
+  lastGps.lat=pos.coords.latitude;
+  lastGps.lng=pos.coords.longitude;
+  lastGps.alt=pos.coords.altitude;
+  lastGps.speed=pos.coords.speed;
+  lastGps.heading=pos.coords.heading;
+  reverseGeocode(lastGps.lat,lastGps.lng);
+}
+
+async function reverseGeocode(lat,lng){
+  try{
+    const url='https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat='+
+      encodeURIComponent(lat)+'&lon='+encodeURIComponent(lng)+'&zoom=18&addressdetails=1';
+    const r=await fetch(url,{headers:{'Accept':'application/json'}});
+    const j=await r.json();
+    const a=j.address||{};
+    lastAddress.village=a.village||a.hamlet||a.neighbourhood||a.suburb||a.quarter||'';
+    lastAddress.subdistrict=a.city_district||a.district||a.subdistrict||a.municipality||'';
+    lastAddress.city=a.city||a.town||a.county||a.regency||'';
+    lastAddress.province=a.state||a.region||'';
+  }catch(e){}
+}
+
+function headingText(deg){
+  if(deg===null || deg===undefined || isNaN(deg)) return '';
+  const dirs=['N','NE','E','SE','S','SW','W','NW'];
+  return Math.round(deg)+'° '+dirs[Math.round(deg/45)%8];
+}
+
+function loadMapSnapshot(lat,lng){
+  return new Promise(function(resolve){
+    if(lat===null || lng===null){resolve(null);return;}
+    const img=new Image();
+    img.crossOrigin='anonymous';
+    // Public OSM static map endpoint; fallback gracefully if unavailable.
+    img.onload=function(){resolve(img);};
+    img.onerror=function(){resolve(null);};
+    img.src='https://staticmap.openstreetmap.de/staticmap.php?center='+lat+','+lng+
+      '&zoom=16&size=360x250&maptype=mapnik&markers='+lat+','+lng+',red-pushpin';
+  });
+}
+
+
+async function captureInternalPhoto(){
   const video=document.getElementById('photoVideo');
 
   if(!video.videoWidth || !video.videoHeight){
@@ -323,32 +368,91 @@ function captureInternalPhoto(){
     ? lastGps.lat.toFixed(6)+', '+lastGps.lng.toFixed(6)
     : 'GPS belum tersedia';
 
-  const lines=[
+  const heading=headingText(lastGps.heading);
+  const altitude=(lastGps.alt!==null && lastGps.alt!==undefined)
+    ? 'Altitude: '+lastGps.alt.toFixed(1)+' m'
+    : '';
+  const speed=(lastGps.speed!==null && lastGps.speed!==undefined)
+    ? 'Speed: '+(lastGps.speed*3.6).toFixed(1)+' km/h'
+    : '';
+
+  const locationLines=[
     tanggal+' '+jam,
-    'AWB: '+awb,
-    'Area: '+area,
+    heading,
+    lastAddress.village ? 'Desa/Kel: '+lastAddress.village : '',
+    lastAddress.subdistrict ? 'Kecamatan: '+lastAddress.subdistrict : '',
+    lastAddress.city ? 'Kab/Kota: '+lastAddress.city : '',
+    lastAddress.province || '',
+    altitude,
+    speed,
     'GPS: '+gps,
-    'H JOEL LOGISTICS'
-  ];
+    'AWB: '+awb,
+    'Area: '+area
+  ].filter(Boolean);
 
-  const fontSize=Math.max(22,Math.round(width*0.022));
+  const fontSize=Math.max(20,Math.round(width*0.021));
   const padding=Math.round(fontSize*0.7);
-  const lineHeight=Math.round(fontSize*1.35);
-  const boxHeight=lineHeight*lines.length + padding*2;
+  const lineHeight=Math.round(fontSize*1.30);
+  const boxHeight=lineHeight*locationLines.length + padding*2;
 
-  ctx.fillStyle='rgba(0,0,0,0.58)';
+  ctx.fillStyle='rgba(0,0,0,0.48)';
   ctx.fillRect(0,height-boxHeight,width,boxHeight);
 
   ctx.fillStyle='#ffffff';
+  ctx.strokeStyle='rgba(0,0,0,.75)';
+  ctx.lineWidth=Math.max(2,fontSize*.10);
   ctx.font='bold '+fontSize+'px Arial';
   ctx.textAlign='right';
   ctx.textBaseline='top';
 
   let y=height-boxHeight+padding;
-  lines.forEach(function(line){
+  locationLines.forEach(function(line){
+    ctx.strokeText(line,width-padding,y);
     ctx.fillText(line,width-padding,y);
     y+=lineHeight;
   });
+
+  // Mini map kiri bawah
+  try{
+    const mapImg=await loadMapSnapshot(lastGps.lat,lastGps.lng);
+    if(mapImg){
+      const mw=Math.round(width*.30);
+      const mh=Math.round(mw*.69);
+      const mx=padding;
+      const my=height-mh-padding;
+      ctx.fillStyle='#fff';
+      ctx.fillRect(mx-3,my-3,mw+6,mh+6);
+      ctx.drawImage(mapImg,mx,my,mw,mh);
+    }
+  }catch(e){}
+
+  // Kompas sederhana kiri atas
+  const cx=padding+Math.round(width*.075);
+  const cy=padding+Math.round(width*.075);
+  const cr=Math.round(width*.065);
+  ctx.beginPath();
+  ctx.arc(cx,cy,cr,0,Math.PI*2);
+  ctx.fillStyle='rgba(20,20,20,.58)';
+  ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.85)';
+  ctx.lineWidth=Math.max(2,width*.003);
+  ctx.stroke();
+  ctx.fillStyle='#fff';
+  ctx.font='bold '+Math.round(cr*.42)+'px Arial';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText('N',cx,cy-cr*.62);
+  ctx.fillText('S',cx,cy+cr*.62);
+  ctx.fillText('W',cx-cr*.62,cy);
+  ctx.fillText('E',cx+cr*.62,cy);
+  let angle=((lastGps.heading||0)-90)*Math.PI/180;
+  ctx.beginPath();
+  ctx.moveTo(cx+Math.cos(angle)*cr*.72,cy+Math.sin(angle)*cr*.72);
+  ctx.lineTo(cx+Math.cos(angle+2.55)*cr*.28,cy+Math.sin(angle+2.55)*cr*.28);
+  ctx.lineTo(cx+Math.cos(angle-2.55)*cr*.28,cy+Math.sin(angle-2.55)*cr*.28);
+  ctx.closePath();
+  ctx.fillStyle='#00b9d8';
+  ctx.fill();
 
   const dataUrl=canvas.toDataURL('image/jpeg',0.78);
 
