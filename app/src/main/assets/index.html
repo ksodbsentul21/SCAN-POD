@@ -25,7 +25,7 @@ input,select{width:100%;min-height:49px;padding:11px;border:1px solid #ccd0d5;bo
 .btn-orange{background:#ff6a00;color:#fff}
 #reader{width:100%;margin-top:10px;overflow:hidden;border-radius:12px;background:#111}
 .photo-card{padding:12px;border:1px dashed #d5d7da;border-radius:12px;margin-bottom:14px}
-.photo-preview{display:none;width:100%;max-height:340px;object-fit:contain;border-radius:10px;background:#f5f5f5;margin-top:8px}
+.photo-preview{display:none;cursor:pointer;width:100%;max-height:340px;object-fit:contain;border-radius:10px;background:#f5f5f5;margin-top:8px}
 .status{display:none;margin-top:15px;padding:12px;border-radius:9px;text-align:center;font-weight:bold;line-height:1.4}
 .status.success{display:block;background:#e1f5e9;color:#14723b}
 .status.error{display:block;background:#fde5e3;color:#b1261c}
@@ -37,6 +37,12 @@ input,select{width:100%;min-height:49px;padding:11px;border:1px solid #ccd0d5;bo
 #photoVideo{width:100%;max-height:72vh;object-fit:cover;border-radius:12px;background:#111}
 .camera-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 .small-note{color:#ddd;text-align:center;font-size:12px;padding:8px 0}
+
+.photo-viewer{display:none;position:fixed;inset:0;background:rgba(0,0,0,.96);z-index:10050;padding:14px}
+.photo-viewer-inner{max-width:760px;height:100%;margin:auto;display:flex;flex-direction:column;justify-content:center}
+.photo-viewer img{max-width:100%;max-height:82vh;object-fit:contain;border-radius:10px;background:#111}
+.photo-viewer-actions{margin-top:12px}
+
 </style>
 </head>
 <body>
@@ -74,25 +80,25 @@ input,select{width:100%;min-height:49px;padding:11px;border:1px solid #ccd0d5;bo
     <div class="photo-card">
       <label>Foto Unit, Penerima & Plang Sekolah</label>
       <button type="button" class="btn-orange" onclick="openInternalCamera(1)">📷 AMBIL FOTO</button>
-      <img id="preview1" class="photo-preview">
+      <img id="preview1" class="photo-preview" onclick="openPhotoPreview(this.src)">
     </div>
 
     <div class="photo-card">
       <label>Foto Plang / Papan Sekolah</label>
       <button type="button" class="btn-orange" onclick="openInternalCamera(2)">📷 AMBIL FOTO</button>
-      <img id="preview2" class="photo-preview">
+      <img id="preview2" class="photo-preview" onclick="openPhotoPreview(this.src)">
     </div>
 
     <div class="photo-card">
       <label>BAST</label>
       <button type="button" class="btn-orange" onclick="openInternalCamera(3)">📷 AMBIL FOTO</button>
-      <img id="preview3" class="photo-preview">
+      <img id="preview3" class="photo-preview" onclick="openPhotoPreview(this.src)">
     </div>
 
     <div class="photo-card">
       <label>Foto Serial Number Unit</label>
       <button type="button" class="btn-orange" onclick="openInternalCamera(4)">📷 AMBIL FOTO</button>
-      <img id="preview4" class="photo-preview">
+      <img id="preview4" class="photo-preview" onclick="openPhotoPreview(this.src)">
     </div>
 
     <button type="button" class="btn-green" onclick="savePOD()">💾 SIMPAN POD</button>
@@ -454,6 +460,29 @@ async function captureInternalPhoto(){
   ctx.fillStyle='#00b9d8';
   ctx.fill();
 
+  // AWB permanen pada hasil foto
+  const awbNow=(document.getElementById('awb').value || '').trim();
+  if(awbNow){
+    const pad=Math.max(14,Math.round(canvas.width*0.022));
+    const fontSize=Math.max(24,Math.round(canvas.width*0.035));
+    const label='AWB: '+awbNow;
+
+    ctx.save();
+    ctx.font='bold '+fontSize+'px Arial';
+    ctx.textBaseline='middle';
+
+    const textW=ctx.measureText(label).width;
+    const boxH=Math.round(fontSize*1.65);
+    const boxW=Math.min(canvas.width-(pad*2), Math.round(textW+(pad*1.4)));
+
+    ctx.fillStyle='rgba(0,0,0,0.72)';
+    ctx.fillRect(pad,pad,boxW,boxH);
+
+    ctx.fillStyle='#ffffff';
+    ctx.fillText(label,pad+Math.round(pad*0.55),pad+Math.round(boxH/2));
+    ctx.restore();
+  }
+
   const dataUrl=canvas.toDataURL('image/jpeg',0.78);
 
   photos[activePhotoSlot]=dataUrl;
@@ -480,6 +509,23 @@ function closeInternalCamera(){
   if(m) m.style.display='none';
 }
 
+
+function openPhotoPreview(src){
+  if(!src) return;
+  const viewer=document.getElementById('photoViewer');
+  const img=document.getElementById('photoViewerImg');
+  img.src=src;
+  viewer.style.display='block';
+}
+
+function closePhotoPreview(){
+  const viewer=document.getElementById('photoViewer');
+  const img=document.getElementById('photoViewerImg');
+  viewer.style.display='none';
+  img.src='';
+}
+
+
 function savePOD(){
   const payload={
     tanggalPOD:document.getElementById('tanggalPOD').value,
@@ -501,6 +547,20 @@ function saveResult(success,message){
   showStatus(message,success?'success':'error');
 
   if(success){
+    const savedAwb=document.getElementById('awb').value.trim();
+
+    try{
+      AndroidBridge.savePhotosToGallery(
+        savedAwb,
+        JSON.stringify({
+          foto1:photos[1],
+          foto2:photos[2],
+          foto3:photos[3],
+          foto4:photos[4]
+        })
+      );
+    }catch(e){}
+
     document.getElementById('awb').value='';
     photos={1:'',2:'',3:'',4:''};
 
@@ -524,5 +584,15 @@ function clearStatus(){
   s.textContent='';
 }
 </script>
+
+<div id="photoViewer" class="photo-viewer" onclick="closePhotoPreview()">
+  <div class="photo-viewer-inner" onclick="event.stopPropagation()">
+    <img id="photoViewerImg" src="" alt="Preview Foto">
+    <div class="photo-viewer-actions">
+      <button type="button" class="btn-red" onclick="closePhotoPreview()">TUTUP PREVIEW</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
