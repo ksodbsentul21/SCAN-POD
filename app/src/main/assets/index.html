@@ -460,29 +460,6 @@ async function captureInternalPhoto(){
   ctx.fillStyle='#00b9d8';
   ctx.fill();
 
-  // AWB permanen pada hasil foto
-  const awbNow=(document.getElementById('awb').value || '').trim();
-  if(awbNow){
-    const pad=Math.max(14,Math.round(canvas.width*0.022));
-    const fontSize=Math.max(24,Math.round(canvas.width*0.035));
-    const label='AWB: '+awbNow;
-
-    ctx.save();
-    ctx.font='bold '+fontSize+'px Arial';
-    ctx.textBaseline='middle';
-
-    const textW=ctx.measureText(label).width;
-    const boxH=Math.round(fontSize*1.65);
-    const boxW=Math.min(canvas.width-(pad*2), Math.round(textW+(pad*1.4)));
-
-    ctx.fillStyle='rgba(0,0,0,0.72)';
-    ctx.fillRect(pad,pad,boxW,boxH);
-
-    ctx.fillStyle='#ffffff';
-    ctx.fillText(label,pad+Math.round(pad*0.55),pad+Math.round(boxH/2));
-    ctx.restore();
-  }
-
   const dataUrl=canvas.toDataURL('image/jpeg',0.78);
 
   photos[activePhotoSlot]=dataUrl;
