@@ -9,6 +9,8 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.widget.Toast;
+import android.os.Environment;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.MediaStore;
@@ -153,6 +155,52 @@ public class MainActivity extends android.app.Activity {
                                 JSONObject.quote("Gagal menyimpan: " + e.getMessage()) + ")";
                         webView.evaluateJavascript(js, null);
                     });
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void savePhotosToGallery(String awb, String photosJson) {
+            io.execute(() -> {
+                int saved = 0;
+
+                try {
+                    JSONObject obj = new JSONObject(photosJson);
+                    String safeAwb = String.valueOf(awb == null ? "" : awb)
+                            .replaceAll("[^A-Za-z0-9_-]", "_");
+
+                    for (int i = 1; i <= 4; i++) {
+                        String dataUrl = obj.optString("foto" + i, "");
+                        if (dataUrl == null || dataUrl.isEmpty()) continue;
+
+                        String name;
+                        if (i == 1) name = "UNIT_PENERIMA";
+                        else if (i == 2) name = "PLANG_SEKOLAH";
+                        else if (i == 3) name = "BAST";
+                        else name = "SERIAL_NUMBER";
+
+                        if (saveDataUrlToGallery(
+                                dataUrl,
+                                "HJOEL_" + safeAwb + "_" + name + "_" + System.currentTimeMillis() + ".jpg"
+                        )) {
+                            saved++;
+                        }
+                    }
+
+                    final int totalSaved = saved;
+
+                    runOnUiThread(() -> Toast.makeText(
+                            MainActivity.this,
+                            totalSaved + " foto POD masuk ke Galeri.",
+                            Toast.LENGTH_LONG
+                    ).show());
+
+                } catch (Exception e) {
+                    runOnUiThread(() -> Toast.makeText(
+                            MainActivity.this,
+                            "Data POD tersimpan, tetapi foto gagal disalin ke Galeri.",
+                            Toast.LENGTH_LONG
+                    ).show());
                 }
             });
         }
@@ -445,6 +493,54 @@ public class MainActivity extends android.app.Activity {
                     pendingPhotoSlot,
                     data.getData()
             );
+        }
+    }
+
+
+    private boolean saveDataUrlToGallery(String dataUrl, String fileName) {
+        try {
+            int comma = dataUrl.indexOf(',');
+            if (comma < 0) return false;
+
+            String base64 = dataUrl.substring(comma + 1);
+            byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(
+                        MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/H JOEL POD"
+                );
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            }
+
+            Uri uri = getContentResolver().insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    values
+            );
+
+            if (uri == null) return false;
+
+            OutputStream os = getContentResolver().openOutputStream(uri);
+            if (os == null) return false;
+
+            os.write(bytes);
+            os.flush();
+            os.close();
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues done = new ContentValues();
+                done.put(MediaStore.Images.Media.IS_PENDING, 0);
+                getContentResolver().update(uri, done, null, null);
+            }
+
+            return true;
+
+        } catch (Exception e) {
+            return false;
         }
     }
 
